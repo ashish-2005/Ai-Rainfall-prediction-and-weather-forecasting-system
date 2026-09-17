@@ -12,6 +12,10 @@ __pycache__/
 
 # Machine Learning models
 *.pkl
+*.joblib
+
+# Machine Learning dataset
+ml-service/data/
 
 # Build files
 dist/
