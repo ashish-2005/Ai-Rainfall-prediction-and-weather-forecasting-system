@@ -14,6 +14,9 @@ __pycache__/
 *.pkl
 *.joblib
 
+# Keep the trained rainfall model for deployment
+!ml-service/models/rainfall_model.pkl
+
 # Machine Learning dataset
 ml-service/data/
 

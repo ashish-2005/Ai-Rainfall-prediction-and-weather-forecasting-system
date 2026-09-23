@@ -1,46 +1,55 @@
 const { predictRainfall } = require("../services/mlService");
 
-const getRainfallPrediction = async (req, res) => {
-    try {
-        const {
-            temperature,
-            humidity,
-            pressure,
-            wind_speed
-        } = req.body;
 
-        if (
-            temperature === undefined ||
-            humidity === undefined ||
-            pressure === undefined ||
-            wind_speed === undefined
-        ) {
+const getPrediction = async (req, res) => {
+
+    try {
+
+        const weatherData = req.body;
+
+        const requiredFields = [
+            "avg_temp",
+            "min_temp",
+            "max_temp",
+            "wind_speed",
+            "air_pressure",
+            "elevation",
+            "latitude",
+            "longitude"
+        ];
+
+        const missingFields = requiredFields.filter(
+            (field) =>
+                weatherData[field] === undefined ||
+                weatherData[field] === null ||
+                weatherData[field] === ""
+        );
+
+        if (missingFields.length > 0) {
+
             return res.status(400).json({
                 success: false,
-                message: "All weather parameters are required"
+                message: "Missing required weather fields",
+                missingFields
             });
         }
 
-        const result = await predictRainfall({
-            temperature,
-            humidity,
-            pressure,
-            wind_speed
-        });
+        const result = await predictRainfall(weatherData);
 
-        res.status(200).json({
-            success: true,
-            data: result
-        });
+        return res.status(200).json(result);
 
     } catch (error) {
-        res.status(500).json({
+
+        console.error("Prediction Controller Error:", error.message);
+
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: "Failed to generate rainfall prediction"
         });
     }
 };
 
+
 module.exports = {
-    getRainfallPrediction
+    getPrediction
 };

@@ -1,25 +1,115 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { predictRainfall } from "../services/predictionService";
 import "./RainfallPrediction.css";
 
 function RainfallPrediction() {
     const [formData, setFormData] = useState({
-        temperature: "",
-        humidity: "",
-        pressure: "",
-        wind_speed: ""
+        avg_temp: "",
+        min_temp: "",
+        max_temp: "",
+        wind_speed: "",
+        air_pressure: "",
+        elevation: "",
+        latitude: "",
+        longitude: ""
     });
 
     const [result, setResult] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
 
+    // Location states
+    const [location, setLocation] = useState("");
+    const [locationResults, setLocationResults] = useState([]);
+    const [locationLoading, setLocationLoading] = useState(false);
+
+    // Prediction history
+    const [history, setHistory] = useState(() => {
+        try {
+            return JSON.parse(
+                localStorage.getItem("rainfallHistory")
+            ) || [];
+        } catch {
+            return [];
+        }
+    });
+
+
+    /* =========================
+       INPUT CHANGE
+    ========================= */
+
     const handleChange = (e) => {
-        setFormData({
-            ...formData,
-            [e.target.name]: e.target.value
-        });
+        const { name, value } = e.target;
+
+        setFormData((prev) => ({
+            ...prev,
+            [name]: value
+        }));
     };
+
+
+    /* =========================
+       LOCATION SEARCH
+    ========================= */
+
+    const searchLocation = async () => {
+        if (!location.trim()) {
+            return;
+        }
+
+        setLocationLoading(true);
+        setLocationResults([]);
+        setError("");
+
+        try {
+            const response = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&limit=5&q=${encodeURIComponent(
+                    location
+                )}`
+            );
+
+            if (!response.ok) {
+                throw new Error("Location search failed");
+            }
+
+            const data = await response.json();
+
+            if (data.length === 0) {
+                setError("Location not found. Try another city.");
+            } else {
+                setLocationResults(data);
+            }
+
+        } catch (err) {
+            console.error(err);
+            setError("Unable to search location.");
+        } finally {
+            setLocationLoading(false);
+        }
+    };
+
+
+    /* =========================
+       SELECT LOCATION
+    ========================= */
+
+    const selectLocation = (place) => {
+        setLocation(place.display_name);
+
+        setFormData((prev) => ({
+            ...prev,
+            latitude: Number(place.lat).toFixed(4),
+            longitude: Number(place.lon).toFixed(4)
+        }));
+
+        setLocationResults([]);
+    };
+
+
+    /* =========================
+       PREDICTION
+    ========================= */
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -30,353 +120,1214 @@ function RainfallPrediction() {
 
         try {
             const data = await predictRainfall({
-                temperature: Number(formData.temperature),
-                humidity: Number(formData.humidity),
-                pressure: Number(formData.pressure),
-                wind_speed: Number(formData.wind_speed)
+                avg_temp: Number(formData.avg_temp),
+                min_temp: Number(formData.min_temp),
+                max_temp: Number(formData.max_temp),
+                wind_speed: Number(formData.wind_speed),
+                air_pressure: Number(formData.air_pressure),
+                elevation: Number(formData.elevation),
+                latitude: Number(formData.latitude),
+                longitude: Number(formData.longitude)
             });
 
-            setResult(data.data);
+            if (!data.success) {
+                throw new Error(
+                    data.error || "Prediction failed"
+                );
+            }
+
+            const prediction = data.prediction;
+
+            setResult(prediction);
+
+
+            /* Save prediction history */
+
+            const historyItem = {
+                id: Date.now(),
+
+                date: new Date().toLocaleString(),
+
+                location: location || "Custom Location",
+
+                latitude: formData.latitude,
+                longitude: formData.longitude,
+
+                rainfall: prediction.rainfall,
+
+                unit: prediction.unit,
+
+                category: prediction.category
+            };
+
+
+            const updatedHistory = [
+                historyItem,
+                ...history
+            ].slice(0, 10);
+
+            setHistory(updatedHistory);
+
+            localStorage.setItem(
+                "rainfallHistory",
+                JSON.stringify(updatedHistory)
+            );
+
         } catch (err) {
             console.error(err);
-            setError("Unable to connect to prediction service.");
+
+            setError(
+                err.message ||
+                "Unable to get rainfall prediction."
+            );
         } finally {
             setLoading(false);
         }
     };
 
-    const getResultClass = () => {
-        if (!result) return "";
 
-        if (result.rainfall_probability >= 75) {
-            return "high";
-        }
+    /* =========================
+       DELETE HISTORY
+    ========================= */
 
-        if (result.rainfall_probability >= 50) {
-            return "medium";
-        }
+    const clearHistory = () => {
+        setHistory([]);
 
-        return "low";
+        localStorage.removeItem(
+            "rainfallHistory"
+        );
     };
 
+
+    /* =========================
+       RESET
+    ========================= */
+
+    const resetForm = () => {
+        setFormData({
+            avg_temp: "",
+            min_temp: "",
+            max_temp: "",
+            wind_speed: "",
+            air_pressure: "",
+            elevation: "",
+            latitude: "",
+            longitude: ""
+        });
+
+        setLocation("");
+        setLocationResults([]);
+        setResult(null);
+        setError("");
+    };
+
+
+    /* =========================
+       RESULT STYLE
+    ========================= */
+
+    const getCategoryClass = () => {
+        if (!result) return "";
+
+        const category =
+            result.category?.toLowerCase();
+
+        if (category?.includes("very heavy"))
+            return "very-heavy";
+
+        if (category?.includes("heavy"))
+            return "heavy";
+
+        if (category?.includes("moderate"))
+            return "moderate";
+
+        if (category?.includes("light"))
+            return "light";
+
+        if (category?.includes("no rainfall"))
+            return "none";
+
+        return "";
+    };
+
+
+    const getCategoryIcon = () => {
+        if (!result) return "☁️";
+
+        const category =
+            result.category?.toLowerCase();
+
+        if (category?.includes("very heavy"))
+            return "⛈️";
+
+        if (category?.includes("heavy"))
+            return "🌧️";
+
+        if (category?.includes("moderate"))
+            return "🌦️";
+
+        if (category?.includes("light"))
+            return "🌦️";
+
+        if (category?.includes("no rainfall"))
+            return "☀️";
+
+        return "🌧️";
+    };
+
+
+    const rainfallValue = result
+        ? Math.min(
+              Number(result.rainfall) || 0,
+              100
+          )
+        : 0;
+
+
     return (
-        <div className="weather-page">
+        <div className="rain-page">
 
-            {/* Navbar */}
-            <nav className="navbar">
-                <div className="logo">
-                    🌦️ RainPredict
-                </div>
+            {/* =========================
+                NAVBAR
+            ========================= */}
 
-                <div className="nav-links">
-                    <span className="active">Prediction</span>
-                    <span>Dashboard</span>
-                    <span>Forecast</span>
-                    <span>History</span>
-                </div>
-            </nav>
+            <header className="topbar">
 
-            {/* Main Content */}
-            <main className="main-container">
+                <div className="brand">
 
-                <section className="hero">
-                    <div>
-                        <p className="small-title">AI WEATHER INTELLIGENCE</p>
-
-                        <h1>
-                            Rainfall Prediction
-                        </h1>
-
-                        <p className="hero-text">
-                            Enter current weather conditions and get an
-                            AI-powered rainfall prediction.
-                        </p>
-                    </div>
-
-                    <div className="hero-icon">
+                    <div className="brand-icon">
                         🌧️
                     </div>
-                </section>
 
-                <div className="content-grid">
+                    <div>
+                        <h2>
+                            RainPredict AI
+                        </h2>
 
-                    {/* Input Card */}
-                    <section className="prediction-card">
+                        <span>
+                            Weather Intelligence
+                        </span>
+                    </div>
 
-                        <div className="card-header">
-                            <div>
-                                <h2>Weather Parameters</h2>
-                                <p>
-                                    Enter the current atmospheric conditions
-                                </p>
-                            </div>
+                </div>
 
-                            <span className="ai-badge">
-                                AI
-                            </span>
+                <div className="status">
+
+                    <span className="status-dot"></span>
+
+                    ML Model Online
+
+                </div>
+
+            </header>
+
+
+            <main className="rain-container">
+
+
+                {/* =========================
+                    HERO
+                ========================= */}
+
+                <section className="hero-section">
+
+                    <div className="hero-content">
+
+                        <div className="eyebrow">
+                            ✦ AI WEATHER INTELLIGENCE
                         </div>
 
-                        <form onSubmit={handleSubmit}>
+                        <h1>
+                            Predict Rainfall
+                            <span> with AI</span>
+                        </h1>
 
-                            <div className="input-grid">
+                        <p>
+                            Enter atmospheric and geographic
+                            conditions to estimate rainfall
+                            using our trained machine learning
+                            model.
+                        </p>
 
-                                <div className="input-group">
-                                    <label>Temperature</label>
+                        <div className="hero-stats">
 
-                                    <div className="input-wrapper">
-                                        <span>🌡️</span>
+                            <div>
+                                <strong>8</strong>
+                                <span>
+                                    Input Features
+                                </span>
+                            </div>
+
+                            <div>
+                                <strong>
+                                    XGBoost
+                                </strong>
+                                <span>
+                                    ML Algorithm
+                                </span>
+                            </div>
+
+                            <div>
+                                <strong>mm</strong>
+                                <span>
+                                    Prediction Unit
+                                </span>
+                            </div>
+
+                        </div>
+
+                    </div>
+
+                    <div className="hero-visual">
+
+                        <div className="weather-orb">
+                            🌧️
+                        </div>
+
+                    </div>
+
+                </section>
+
+
+                {/* =========================
+                    LOCATION SEARCH
+                ========================= */}
+
+                <section className="location-card">
+
+                    <div className="location-heading">
+
+                        <div className="location-icon">
+                            📍
+                        </div>
+
+                        <div>
+                            <h2>
+                                Search Location
+                            </h2>
+
+                            <p>
+                                Find a city to automatically
+                                get its coordinates.
+                            </p>
+                        </div>
+
+                    </div>
+
+
+                    <div className="location-search">
+
+                        <input
+                            type="text"
+                            placeholder="Search city, district or place..."
+                            value={location}
+                            onChange={(e) =>
+                                setLocation(
+                                    e.target.value
+                                )
+                            }
+                            onKeyDown={(e) => {
+                                if (
+                                    e.key === "Enter"
+                                ) {
+                                    searchLocation();
+                                }
+                            }}
+                        />
+
+                        <button
+                            type="button"
+                            onClick={searchLocation}
+                            disabled={
+                                locationLoading
+                            }
+                        >
+                            {locationLoading
+                                ? "Searching..."
+                                : "Search"}
+                        </button>
+
+                    </div>
+
+
+                    {/* Search results */}
+
+                    {locationResults.length > 0 && (
+
+                        <div className="location-results">
+
+                            {locationResults.map(
+                                (place) => (
+
+                                    <button
+                                        type="button"
+                                        key={place.place_id}
+                                        onClick={() =>
+                                            selectLocation(
+                                                place
+                                            )
+                                        }
+                                    >
+
+                                        <span>
+                                            📍
+                                        </span>
+
+                                        <div>
+                                            <strong>
+                                                {
+                                                    place.name
+                                                }
+                                            </strong>
+
+                                            <small>
+                                                {
+                                                    place.display_name
+                                                }
+                                            </small>
+                                        </div>
+
+                                    </button>
+
+                                )
+                            )}
+
+                        </div>
+
+                    )}
+
+
+                    {location && (
+                        <div className="coordinates">
+
+                            <span>
+                                Latitude:
+                                <strong>
+                                    {formData.latitude ||
+                                        "--"}
+                                </strong>
+                            </span>
+
+                            <span>
+                                Longitude:
+                                <strong>
+                                    {formData.longitude ||
+                                        "--"}
+                                </strong>
+                            </span>
+
+                        </div>
+                    )}
+
+                </section>
+
+
+                {/* =========================
+                    MAIN DASHBOARD
+                ========================= */}
+
+                <section className="dashboard-grid">
+
+
+                    {/* INPUT CARD */}
+
+                    <div className="weather-card input-card">
+
+                        <div className="card-top">
+
+                            <div>
+
+                                <span className="card-label">
+                                    WEATHER INPUT
+                                </span>
+
+                                <h2>
+                                    Atmospheric Conditions
+                                </h2>
+
+                                <p>
+                                    Provide current weather
+                                    parameters
+                                </p>
+
+                            </div>
+
+                            <div className="card-number">
+                                01
+                            </div>
+
+                        </div>
+
+
+                        <form
+                            onSubmit={handleSubmit}
+                        >
+
+                            <div className="fields-grid">
+
+
+                                {/* Average temperature */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Average Temperature
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            🌡️
+                                        </span>
 
                                         <input
                                             type="number"
-                                            name="temperature"
-                                            placeholder="28"
-                                            value={formData.temperature}
-                                            onChange={handleChange}
+                                            step="any"
+                                            name="avg_temp"
+                                            placeholder="25"
+                                            value={
+                                                formData.avg_temp
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
                                             required
                                         />
 
-                                        <span>°C</span>
+                                        <span className="unit">
+                                            °C
+                                        </span>
+
                                     </div>
+
                                 </div>
 
-                                <div className="input-group">
-                                    <label>Humidity</label>
 
-                                    <div className="input-wrapper">
-                                        <span>💧</span>
+                                {/* Minimum */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Minimum Temperature
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            ❄️
+                                        </span>
 
                                         <input
                                             type="number"
-                                            name="humidity"
-                                            placeholder="80"
+                                            step="any"
+                                            name="min_temp"
+                                            placeholder="20"
+                                            value={
+                                                formData.min_temp
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
+                                            required
+                                        />
+
+                                        <span className="unit">
+                                            °C
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+
+                                {/* Maximum */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Maximum Temperature
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            🔥
+                                        </span>
+
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            name="max_temp"
+                                            placeholder="30"
+                                            value={
+                                                formData.max_temp
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
+                                            required
+                                        />
+
+                                        <span className="unit">
+                                            °C
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+
+                                {/* Wind */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Wind Speed
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            💨
+                                        </span>
+
+                                        <input
+                                            type="number"
+                                            step="any"
                                             min="0"
-                                            max="100"
-                                            value={formData.humidity}
-                                            onChange={handleChange}
-                                            required
-                                        />
-
-                                        <span>%</span>
-                                    </div>
-                                </div>
-
-                                <div className="input-group">
-                                    <label>Atmospheric Pressure</label>
-
-                                    <div className="input-wrapper">
-                                        <span>🌬️</span>
-
-                                        <input
-                                            type="number"
-                                            name="pressure"
-                                            placeholder="1012"
-                                            value={formData.pressure}
-                                            onChange={handleChange}
-                                            required
-                                        />
-
-                                        <span>hPa</span>
-                                    </div>
-                                </div>
-
-                                <div className="input-group">
-                                    <label>Wind Speed</label>
-
-                                    <div className="input-wrapper">
-                                        <span>💨</span>
-
-                                        <input
-                                            type="number"
                                             name="wind_speed"
-                                            placeholder="12"
-                                            min="0"
-                                            value={formData.wind_speed}
-                                            onChange={handleChange}
+                                            placeholder="5"
+                                            value={
+                                                formData.wind_speed
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
                                             required
                                         />
 
-                                        <span>km/h</span>
+                                        <span className="unit">
+                                            m/s
+                                        </span>
+
                                     </div>
+
+                                </div>
+
+
+                                {/* Pressure */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Air Pressure
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            🌬️
+                                        </span>
+
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            name="air_pressure"
+                                            placeholder="1010"
+                                            value={
+                                                formData.air_pressure
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
+                                            required
+                                        />
+
+                                        <span className="unit">
+                                            hPa
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+
+                                {/* Elevation */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Elevation
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            ⛰️
+                                        </span>
+
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            name="elevation"
+                                            placeholder="100"
+                                            value={
+                                                formData.elevation
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
+                                            required
+                                        />
+
+                                        <span className="unit">
+                                            m
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+
+                                {/* Latitude */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Latitude
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            📍
+                                        </span>
+
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            name="latitude"
+                                            placeholder="28.61"
+                                            value={
+                                                formData.latitude
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
+                                            required
+                                        />
+
+                                        <span className="unit">
+                                            °
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+
+                                {/* Longitude */}
+
+                                <div className="field">
+
+                                    <label>
+                                        Longitude
+                                    </label>
+
+                                    <div className="field-input">
+
+                                        <span>
+                                            📍
+                                        </span>
+
+                                        <input
+                                            type="number"
+                                            step="any"
+                                            name="longitude"
+                                            placeholder="77.20"
+                                            value={
+                                                formData.longitude
+                                            }
+                                            onChange={
+                                                handleChange
+                                            }
+                                            required
+                                        />
+
+                                        <span className="unit">
+                                            °
+                                        </span>
+
+                                    </div>
+
                                 </div>
 
                             </div>
 
-                            <button
-                                className="predict-button"
-                                type="submit"
-                                disabled={loading}
-                            >
-                                {loading ? (
-                                    <>
-                                        <span className="spinner"></span>
-                                        Analyzing...
-                                    </>
-                                ) : (
-                                    <>
-                                        Predict Rainfall
-                                        <span>→</span>
-                                    </>
-                                )}
-                            </button>
+
+                            {/* Error */}
+
+                            {error && (
+
+                                <div className="error-box">
+
+                                    ⚠️
+
+                                    <div>
+                                        <strong>
+                                            Error
+                                        </strong>
+
+                                        <p>
+                                            {error}
+                                        </p>
+                                    </div>
+
+                                </div>
+
+                            )}
+
+
+                            <div className="form-actions">
+
+                                <button
+                                    type="button"
+                                    className="reset-button"
+                                    onClick={resetForm}
+                                >
+                                    Reset
+                                </button>
+
+                                <button
+                                    type="submit"
+                                    className="predict-button"
+                                    disabled={loading}
+                                >
+
+                                    {loading ? (
+                                        <>
+                                            <span className="spinner"></span>
+                                            Analyzing...
+                                        </>
+                                    ) : (
+                                        <>
+                                            ✦
+                                            Predict Rainfall
+                                            →
+                                        </>
+                                    )}
+
+                                </button>
+
+                            </div>
 
                         </form>
 
-                        {error && (
-                            <div className="error-message">
-                                ⚠️ {error}
-                            </div>
-                        )}
+                    </div>
 
-                    </section>
 
-                    {/* Result Card */}
-                    <section className={`result-card ${getResultClass()}`}>
+                    {/* RESULT CARD */}
 
-                        {!result ? (
-                            <div className="empty-result">
+                    <div
+                        className={`weather-card result-card ${getCategoryClass()}`}
+                    >
 
-                                <div className="result-icon">
-                                    ☁️
-                                </div>
+                        <div className="card-top">
 
-                                <h2>Prediction Result</h2>
+                            <div>
 
-                                <p>
-                                    Enter weather parameters and click
-                                    <strong> Predict Rainfall </strong>
-                                    to see the result.
-                                </p>
-
-                            </div>
-                        ) : (
-                            <div className="result-content">
-
-                                <p className="result-label">
-                                    PREDICTION RESULT
-                                </p>
-
-                                <div className="result-icon">
-                                    {result.rainfall_probability >= 75
-                                        ? "🌧️"
-                                        : result.rainfall_probability >= 50
-                                            ? "🌦️"
-                                            : "☀️"}
-                                </div>
+                                <span className="card-label">
+                                    AI PREDICTION
+                                </span>
 
                                 <h2>
-                                    {result.prediction}
+                                    Rainfall Analysis
                                 </h2>
 
-                                <div className="probability">
+                                <p>
+                                    Machine learning result
+                                </p>
+
+                            </div>
+
+                            <div className="card-number">
+                                02
+                            </div>
+
+                        </div>
+
+
+                        {!result ? (
+
+                            <div className="empty-state">
+
+                                <div className="empty-icon">
+                                    ✦
+                                </div>
+
+                                <h3>
+                                    Waiting for prediction
+                                </h3>
+
+                                <p>
+                                    Enter weather parameters
+                                    and run the AI model.
+                                </p>
+
+                            </div>
+
+                        ) : (
+
+                            <div className="result-content">
+
+                                <div className="result-category">
+
+                                    <div className="category-icon">
+                                        {getCategoryIcon()}
+                                    </div>
+
+                                    <div>
+
+                                        <span>
+                                            PREDICTED CONDITION
+                                        </span>
+
+                                        <h3>
+                                            {
+                                                result.category
+                                            }
+                                        </h3>
+
+                                    </div>
+
+                                </div>
+
+
+                                <div className="rainfall-value">
+
+                                    <strong>
+                                        {
+                                            result.rainfall
+                                        }
+                                    </strong>
+
                                     <span>
-                                        {result.rainfall_probability}%
+                                        {
+                                            result.unit
+                                        }
                                     </span>
 
-                                    <small>
-                                        Rainfall Probability
-                                    </small>
                                 </div>
 
-                                <div className="progress">
-                                    <div
-                                        className="progress-bar"
-                                        style={{
-                                            width: `${result.rainfall_probability}%`
-                                        }}
-                                    ></div>
+                                <p className="rainfall-label">
+                                    Predicted Rainfall
+                                </p>
+
+
+                                <div className="meter">
+
+                                    <div className="meter-header">
+
+                                        <span>
+                                            Rainfall Intensity
+                                        </span>
+
+                                        <strong>
+                                            {
+                                                result.category
+                                            }
+                                        </strong>
+
+                                    </div>
+
+                                    <div className="meter-track">
+
+                                        <div
+                                            className="meter-fill"
+                                            style={{
+                                                width:
+                                                    `${rainfallValue}%`
+                                            }}
+                                        />
+
+                                    </div>
+
                                 </div>
 
-                                <div className="result-details">
+
+                                <div className="result-info">
 
                                     <div>
-                                        <span>🌡️</span>
-                                        <p>
-                                            <small>Temperature</small>
+                                        🌡️
+                                        <div>
+                                            <small>
+                                                Temperature
+                                            </small>
+
                                             <strong>
-                                                {result.temperature}°C
+                                                {
+                                                    formData.avg_temp
+                                                } °C
                                             </strong>
-                                        </p>
+                                        </div>
                                     </div>
 
-                                    <div>
-                                        <span>💧</span>
-                                        <p>
-                                            <small>Humidity</small>
-                                            <strong>
-                                                {result.humidity}%
-                                            </strong>
-                                        </p>
-                                    </div>
 
                                     <div>
-                                        <span>🌬️</span>
-                                        <p>
-                                            <small>Pressure</small>
+                                        💨
+                                        <div>
+                                            <small>
+                                                Wind
+                                            </small>
+
                                             <strong>
-                                                {result.pressure} hPa
+                                                {
+                                                    formData.wind_speed
+                                                } m/s
                                             </strong>
-                                        </p>
+                                        </div>
                                     </div>
 
+
                                     <div>
-                                        <span>💨</span>
-                                        <p>
-                                            <small>Wind</small>
+                                        🌬️
+                                        <div>
+                                            <small>
+                                                Pressure
+                                            </small>
+
                                             <strong>
-                                                {result.wind_speed} km/h
+                                                {
+                                                    formData.air_pressure
+                                                } hPa
                                             </strong>
-                                        </p>
+                                        </div>
+                                    </div>
+
+
+                                    <div>
+                                        📍
+                                        <div>
+                                            <small>
+                                                Location
+                                            </small>
+
+                                            <strong>
+                                                {
+                                                    formData.latitude
+                                                },
+                                                {" "}
+                                                {
+                                                    formData.longitude
+                                                }
+                                            </strong>
+                                        </div>
                                     </div>
 
                                 </div>
 
                             </div>
+
                         )}
 
-                    </section>
+                    </div>
 
-                </div>
+                </section>
 
-                {/* Bottom Info */}
-                <section className="info-section">
 
-                    <div>
-                        <span>🤖</span>
+                {/* =========================
+                    HISTORY
+                ========================= */}
+
+                <section className="history-section">
+
+                    <div className="history-header">
 
                         <div>
-                            <h3>AI-Powered Prediction</h3>
+
+                            <span className="card-label">
+                                RECENT PREDICTIONS
+                            </span>
+
+                            <h2>
+                                Prediction History
+                            </h2>
+
                             <p>
-                                Weather parameters are analyzed to estimate
-                                rainfall probability.
+                                Your latest rainfall predictions
+                            </p>
+
+                        </div>
+
+                        {history.length > 0 && (
+
+                            <button
+                                type="button"
+                                className="clear-history"
+                                onClick={clearHistory}
+                            >
+                                Clear History
+                            </button>
+
+                        )}
+
+                    </div>
+
+
+                    {history.length === 0 ? (
+
+                        <div className="history-empty">
+                            🕘
+                            <p>
+                                No predictions yet.
+                            </p>
+                        </div>
+
+                    ) : (
+
+                        <div className="history-list">
+
+                            {history.map((item) => (
+
+                                <div
+                                    className="history-item"
+                                    key={item.id}
+                                >
+
+                                    <div className="history-weather">
+                                        {item.category
+                                            ?.toLowerCase()
+                                            .includes("heavy")
+                                            ? "🌧️"
+                                            : "🌦️"}
+                                    </div>
+
+
+                                    <div className="history-location">
+
+                                        <strong>
+                                            {item.location}
+                                        </strong>
+
+                                        <small>
+                                            {item.date}
+                                        </small>
+
+                                    </div>
+
+
+                                    <div className="history-coordinates">
+
+                                        <small>
+                                            Coordinates
+                                        </small>
+
+                                        <span>
+                                            {item.latitude},
+                                            {" "}
+                                            {item.longitude}
+                                        </span>
+
+                                    </div>
+
+
+                                    <div className="history-result">
+
+                                        <strong>
+                                            {item.rainfall}{" "}
+                                            {item.unit}
+                                        </strong>
+
+                                        <span>
+                                            {item.category}
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+                            ))}
+
+                        </div>
+
+                    )}
+
+                </section>
+
+
+                {/* =========================
+                    FEATURES
+                ========================= */}
+
+                <section className="features">
+
+                    <div className="feature">
+                        <div className="feature-icon">
+                            🤖
+                        </div>
+
+                        <div>
+                            <h3>
+                                XGBoost Machine Learning
+                            </h3>
+
+                            <p>
+                                Prediction generated using
+                                the trained regression model.
                             </p>
                         </div>
                     </div>
 
-                    <div>
-                        <span>⚡</span>
+
+                    <div className="feature">
+                        <div className="feature-icon">
+                            📍
+                        </div>
 
                         <div>
-                            <h3>Fast Results</h3>
+                            <h3>
+                                Location Intelligence
+                            </h3>
+
                             <p>
-                                Get prediction results instantly through the
-                                connected ML service.
+                                Search a location and automatically
+                                obtain coordinates.
                             </p>
                         </div>
                     </div>
 
-                    <div>
-                        <span>📊</span>
+
+                    <div className="feature">
+                        <div className="feature-icon">
+                            🕘
+                        </div>
 
                         <div>
-                            <h3>Data Insights</h3>
+                            <h3>
+                                Prediction History
+                            </h3>
+
                             <p>
-                                View important weather parameters alongside
-                                your prediction.
+                                Previous predictions are stored
+                                locally in your browser.
                             </p>
                         </div>
                     </div>
 
                 </section>
+
+
+                <footer>
+
+                    <span>
+                        RainPredict AI
+                    </span>
+
+                    <span>
+                        AI Rainfall Prediction System • 2026
+                    </span>
+
+                </footer>
 
             </main>
 

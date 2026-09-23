@@ -1,11 +1,11 @@
 const express = require("express");
 
 const {
-    getRainfallPrediction
+    getPrediction
 } = require("../controllers/predictionController");
 
 const router = express.Router();
 
-router.post("/rainfall", getRainfallPrediction);
+router.post("/", getPrediction);
 
 module.exports = router;
